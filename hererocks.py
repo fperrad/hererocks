@@ -1677,6 +1677,64 @@ class MoonJIT(LuaJIT):
     def get_download_urls(self):
         return ["{}/{}.tar.gz".format(self.base_download_url, self.version)]
 
+class RaptorJIT(LuaJIT):
+    name = "raptorjit"
+    title = "RaptorJIT"
+    base_download_url = "https://github.com/raptorjit/raptorjit/archive"
+    default_repo = "https://github.com/raptorjit/raptorjit"
+    versions = [
+        "1.0.0", "1.0.1", "1.0.2", "1.0.3"
+    ]
+    translations = {
+        "1": "1.0.3",
+        "1.0": "1.0.3",
+        "^": "1.0.3",
+        "latest": "1.0.3"
+    }
+    checksums = {
+        "raptorjit-1.0.0.tar.gz": "886bbe6b9b282260d76af45993857254ad11d280be3c1c147058b7bc544d77a0",
+        "raptorjit-1.0.1.tar.gz": "4666d51d24040176b2b5d6ab58f1d4452db4b6cb09a4f8dc38d9559377b07d73",
+        "raptorjit-1.0.2.tar.gz": "83495dbbfa503593fc3390f9772e5f1e109de5cc1590686f4da3445189ee7f80",
+        "raptorjit-1.0.3.tar.gz": "d921eb544e64eaefb30656f53eee7e71beb7fc590269fec06a90a4e66cb0d6e5",
+    }
+
+    def get_download_name(self):
+        return "{}-{}.tar.gz".format(self.name, self.version)
+
+    def get_download_urls(self):
+        return ["{}/v{}.tar.gz".format(self.base_download_url, self.version)]
+
+    def make_install(self):
+        luajit_file = exe("raptorjit")
+        lua_file = exe("lua")
+        arch_file = "raptorjit.a"
+        target_arch_file = "libluajit-5.1.a"
+        so_file = "libraptorjit.so"
+        target_so_file = "libluajit-5.1.so.2"
+        dll_file = None
+
+        with self.in_source_files_prefix():
+            copy_files(os.path.join(opts.location, "bin"), dll_file)
+            shutil.copy(luajit_file, os.path.join(opts.location, "bin", lua_file))
+
+            copy_files(os.path.join(opts.location, "include"),
+                       "lua.h", "luaconf.h", "lualib.h", "lauxlib.h", "lua.hpp", "luajit.h")
+
+            copy_files(os.path.join(opts.location, "lib"))
+
+            if opts.target != "mingw":
+                shutil.copy(arch_file, os.path.join(opts.location, "lib", target_arch_file))
+
+            shutil.copy(so_file, os.path.join(opts.location, "lib", target_so_file))
+
+            jitlib_path = os.path.join(
+                opts.location, "share", "lua", self.major_version, "jit")
+
+            if os.path.exists(jitlib_path):
+                remove_dir(jitlib_path)
+
+            copy_dir("jit", jitlib_path)
+
 class LuaRocks(Program):
     name = "luarocks"
     title = "LuaRocks"
@@ -1822,7 +1880,8 @@ class LuaRocks(Program):
     def build(self):
         self.lua_identifiers = self.all_identifiers.get("lua",
                                                         self.all_identifiers.get("LuaJIT",
-                                                                                 self.all_identifiers.get("moonjit")))
+                                                                                 self.all_identifiers.get("moonjit",
+                                                                                                          self.all_identifiers.get("raptorjit"))))
 
         if self.lua_identifiers is None:
             sys.exit("Error: can't install LuaRocks: Lua is not present in {}".format(opts.location))
@@ -2122,6 +2181,15 @@ def install_programs(vs_already_set_up):
 
         os.chdir(start_dir)
 
+    if opts.raptorjit:
+        if "lua" in identifiers:
+            del identifiers["lua"]
+
+        if RaptorJIT(opts.raptorjit).update_identifiers(identifiers):
+            save_installed_identifiers(identifiers)
+
+        os.chdir(start_dir)
+
     if opts.luarocks:
         if LuaRocks(opts.luarocks).update_identifiers(identifiers):
             save_installed_identifiers(identifiers)
@@ -2181,14 +2249,20 @@ def main(argv=None):
         "'latest' and '^' are aliases for to 2.1.2. "
         "Default git repo is https://github.com/moonjit/moonjit. ")
     parser.add_argument(
+        "--raptorjit", help="Version of RaptorJIT to install. "
+        "Version can be specified in the same way as for standard Lua. "
+        "Versions 1.0.0 - 1.0.3 are supported. "
+        "'latest' and '^' are aliases for to 1.0.3. "
+        "Default git repo is https://github.com/raptorjit/raptorjit. ")
+    parser.add_argument(
         "-r", "--luarocks", help="Version of LuaRocks to install. "
         "Version can be specified in the same way as for standard Lua. "
         "Versions 2.0.8 - 3.3.1 are supported. "
         "'latest' and '^' are aliases for 3.3.1. "
         "Default git repo is https://github.com/luarocks/luarocks. "
         "Note that Lua 5.2 is not supported in LuaRocks 2.0.8, "
-        "Lua 5.3 is supported only since LuaRocks 2.2.0, and Lua 5.4 is supported only since "
-        "LuaRocks 3.0.0.")
+        "Lua 5.3 is supported only since LuaRocks 2.2.0, Lua 5.4 is supported only since "
+        "LuaRocks 3.0.0, and RaptorJIT is supported only since LuaRocks 3.2.0.")
     parser.add_argument("--show", default=False, action="store_true",
                         help="Show programs installed in <location>, possibly after installing new ones.")
     parser.add_argument("-i", "--ignore-installed", default=False, action="store_true",
@@ -2258,9 +2332,11 @@ def main(argv=None):
         nb_lua += 1
     if opts.moonjit:
         nb_lua += 1
+    if opts.raptorjit:
+        nb_lua += 1
 
     if nb_lua == 0 and not opts.luarocks and not opts.show:
-        parser.error("a version of Lua, LuaJIT, moonjit, or LuaRocks needs to be specified unless --show is used")
+        parser.error("a version of Lua, LuaJIT, moonjit, RaptorJIT or LuaRocks needs to be specified unless --show is used")
 
     if nb_lua > 1:
         parser.error("can't install more than one Lua interpreter")
