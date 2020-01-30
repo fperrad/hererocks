@@ -1940,12 +1940,92 @@ class MoonJIT(LuaJIT):
         "moonjit-2.1.2.tar.gz": "c3de8e29aa617fc594c043f57636ab9ad71af2b4a3a513932b05f5cdaa4320b2",
         "moonjit-2.2.0.tar.gz": "83deb2c880488dfe7dd8ebf09e3b1e7613ef4b8420de53de6f712f01aabca2b6",
     }
+    all_patches = {
+        "Build thread.exdata only if LJ_HASFFI": """
+            lj_ffrecord.c:
+            @@ -1109,6 +1109,7 @@
+             
+             /* -- thread library fast functions ------------------------------------------ */
+             
+            +#if LJ_HASFFI
+             void LJ_FASTCALL recff_thread_exdata(jit_State *J, RecordFFData *rd)
+             {
+               TRef tr = J->base[0];
+            @@ -1121,6 +1122,7 @@
+               }
+               recff_nyiu(J, rd);  /* this case is too rare to be interesting */
+             }
+            +#endif
+             
+             /* -- I/O library fast functions ------------------------------------------ */
+             
+        """,
+        "fix string_gsub": """
+            lib_string.c:
+            @@ -621,7 +621,7 @@
+               const char *p = luaL_checklstring(L, 2, &lp);
+               int  tr = lua_type(L, 3);
+               int max_s = luaL_optint(L, 4, (int)(srcl+1));
+            -  int anchor = (*p == '^') ? (p++, 1) : 0;
+            +  int anchor = (*p == '^');
+               int n = 0;
+               MatchState ms;
+               luaL_Buffer b;
+            @@ -629,6 +629,9 @@
+             	tr == LUA_TFUNCTION || tr == LUA_TTABLE))
+                 lj_err_arg(L, 3, LJ_ERR_NOSFT);
+               luaL_buffinit(L, &b);
+            +  if (anchor) {
+            +    p++; lp--;  /* skip anchor character */
+            +  }
+            ms.L = L;
+            ms.src_init = src;
+            ms.src_end = src+srcl;
+        """
+    }
+    patches_per_version = {
+        "2.2.0": [
+            "Build thread.exdata only if LJ_HASFFI",
+            "fix string_gsub"
+        ]
+    }
 
     def get_download_name(self):
         return "{}-{}.tar.gz".format(self.name, self.version)
 
     def get_download_urls(self):
         return ["{}/{}.tar.gz".format(self.base_download_url, self.version)]
+
+    def apply_patch(self, patch_name):
+        patch = self.all_patches[patch_name]
+        err = Patch(patch).apply()
+        status = "OK" if err is None else "fail - {}".format(err)
+        print('Patch for "{}": {}'.format(patch_name, status))
+        return err is None
+
+    def handle_patches(self):
+        patches = self.patches_per_version.get(self.version, [])
+
+        if not patches:
+            print("No patches available for moonjit {}".format(self.version))
+            return
+
+        if not opts.patch:
+            print("Skipping {} patch{}, use --patch to apply {}".format(
+                len(patches), "" if len(patches) == 1 else "es",
+                "it" if len(patches) == 1 else "them"))
+            return
+
+        applied = sum(map(self.apply_patch, patches))
+        print("Applied {} patch{} ({} available for this version)".format(
+            applied, "" if applied == 1 else "es", len(patches)))
+
+    def make(self):
+        with self.in_source_files_prefix():
+            self.handle_patches()
+
+        super(MoonJIT, self).make()
+
 
 class RaptorJIT(LuaJIT):
     name = "raptorjit"
